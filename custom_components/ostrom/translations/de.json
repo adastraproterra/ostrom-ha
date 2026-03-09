@@ -1,0 +1,50 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Ostrom einrichten",
+        "description": "API-Zugangsdaten vom [Ostrom Developer Portal]({portal_url}) eingeben.",
+        "data": {
+          "client_id": "Client ID",
+          "client_secret": "Client Secret",
+          "zip_code": "Postleitzahl",
+          "arbeitspreis": "Arbeitspreis (ct/kWh)"
+        },
+        "data_description": {
+          "client_id": "Deine OAuth2 Client ID aus dem Ostrom Developer Portal.",
+          "client_secret": "Dein OAuth2 Client Secret aus dem Ostrom Developer Portal.",
+          "zip_code": "Deine Postleitzahl – wird für regionale Netzentgelte benötigt.",
+          "arbeitspreis": "Dein vertraglich festgelegter Arbeitspreis in ct/kWh (wird als fester Sensor angezeigt)."
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Authentifizierung fehlgeschlagen. Bitte Client ID und Secret prüfen.",
+      "cannot_connect": "Verbindung zur Ostrom API fehlgeschlagen. Bitte erneut versuchen.",
+      "unknown": "Ein unbekannter Fehler ist aufgetreten."
+    },
+    "abort": {
+      "already_configured": "Ostrom ist bereits konfiguriert."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "arbeitspreis": {
+        "name": "Arbeitspreis"
+      },
+      "current_price": {
+        "name": "Aktueller Strompreis"
+      },
+      "monthly_consumption": {
+        "name": "Verbrauch diesen Monat"
+      },
+      "daily_consumption": {
+        "name": "Verbrauch heute"
+      },
+      "total_cost": {
+        "name": "Kosten diesen Monat"
+      }
+    }
+  }
+}
+
