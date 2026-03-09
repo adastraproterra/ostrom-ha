@@ -35,7 +35,7 @@ A custom Home Assistant integration for the German energy provider **Ostrom**. P
 1. Open **HACS > Integrations**
 2. Click **(top right) Custom repositories**
 3. Enter the URL: `https://github.com/adastraproterra/ostrom-ha`
-4. Category: **Integration** â†’ click **Add**
+4. Category: **Integration** click **Add**
 5. Search for **Ostrom** in HACS and click **Download**
 6. **Restart Home Assistant**
 
