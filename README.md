@@ -17,7 +17,7 @@ A custom Home Assistant integration for the German energy provider **Ostrom**. P
 |  **24h Price Forecast** | All upcoming hourly prices as a sensor attribute  perfect for ApexCharts |
 |  **Daily Consumption** | Energy used today in kWh |
 |  **Monthly Consumption** | Energy used this month in kWh |
-|  **Monthly Cost** | Gross electricity cost for the current month in â‚¬ |
+|  **Monthly Cost** | Gross electricity cost for the current month in € |
 
 ---
 
