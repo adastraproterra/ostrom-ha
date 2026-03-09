@@ -12,7 +12,7 @@ A custom Home Assistant integration for the German energy provider **Ostrom**. P
 
 | Feature | Description |
 |---|---|
-|  **Working Price** | Static contracted rate in ct/kWh “ always visible as a sensor |
+|  **Working Price** | Static contracted rate in ct/kWh always visible as a sensor |
 |  **Current Spot Price** | Live hourly electricity price in ct/kWh, updated every hour |
 |  **24h Price Forecast** | All upcoming hourly prices as a sensor attribute  perfect for ApexCharts |
 |  **Daily Consumption** | Energy used today in kWh |
