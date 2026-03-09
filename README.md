@@ -66,7 +66,7 @@ A custom Home Assistant integration for the German energy provider **Ostrom**. P
 | `sensor.ostrom_monthly_consumption` | kWh | Consumption this month |
 | `sensor.ostrom_monthly_cost` | € | Gross cost this month |
 
-> **Tip:** The `current_electricity_price` sensor includes a `preisprognose_24h` attribute containing all hourly forecast prices as a list â€” ideal for use with the ApexCharts card.
+> **Tip:** The `current_electricity_price` sensor includes a `preisprognose_24h` attribute containing all hourly forecast prices as a list ideal for use with the ApexCharts card.
 
 ---
 
