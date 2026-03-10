@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import logging
+from typing import Any
 from urllib.parse import quote
 
 import aiohttp
@@ -39,10 +40,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 async def _validate_credentials(
     client_id: str, client_secret: str, username: str, password: str
 ) -> str | None:
-    """
-    Try to authenticate using password grant (for fetching own customer data).
-    Returns the access token on success, None on failure.
-    """
+    """Try to authenticate. Returns access token or None."""
     encoded = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
     headers = {
         "Authorization": f"Basic {encoded}",
@@ -54,22 +52,18 @@ async def _validate_credentials(
         f"&username={quote(username)}"
         f"&password={quote(password)}"
     )
-    try:
-        async with aiohttp.ClientSession() as session:
-            resp = await session.post(
-                URI_AUTH,
-                data=body,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10),
-            )
-            if resp.status == 200:
-                data = await resp.json()
-                return data.get("access_token")
-            text = await resp.text()
-            _LOGGER.debug("Auth failed (%s): %s", resp.status, text)
-            return None
-    except aiohttp.ClientError as err:
-        _LOGGER.debug("Auth connection error: %s", err)
+    async with aiohttp.ClientSession() as session:
+        resp = await session.post(
+            URI_AUTH,
+            data=body,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=10),
+        )
+        if resp.status == 200:
+            data = await resp.json()
+            return data.get("access_token")
+        text = await resp.text()
+        _LOGGER.debug("Auth failed (%s): %s", resp.status, text)
         return None
 
 
@@ -79,7 +73,7 @@ class OstromConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(
-        self, user_input: dict | None = None
+        self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}
@@ -92,13 +86,40 @@ class OstromConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             zip_code = user_input[CONF_ZIP_CODE].strip()
             arbeitspreis = user_input[CONF_ARBEITSPREIS]
 
-            token = await _validate_credentials(client_id, client_secret, username, password)
-            if not token:
-                errors["base"] = "invalid_auth"
+            try:
+                token = await _validate_credentials(
+                    client_id, client_secret, username, password
+                )
+            except aiohttp.ClientError:
+                errors["base"] = "cannot_connect"
+            except Exception:  # noqa: BLE001
+                errors["base"] = "unknown"
             else:
-                await self.async_set_unique_id(username.lower())
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(
+                if not token:
+                    errors["base"] = "invalid_auth"
+                else:
+                    await self.async_set_unique_id(username.lower())
+                    self._abort_if_unique_id_configured()
+                    return self.async_create_entry(
+                        title=f"Ostrom ({zip_code})",
+                        data={
+                            CONF_CLIENT_ID: client_id,
+                            CONF_CLIENT_SECRET: client_secret,
+                            CONF_USERNAME: username,
+                            CONF_PASSWORD: password,
+                            CONF_ZIP_CODE: zip_code,
+                            CONF_ARBEITSPREIS: arbeitspreis,
+                        },
+                    )
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=STEP_USER_DATA_SCHEMA,
+            errors=errors,
+            description_placeholders={
+                "portal_url": "https://developer.ostrom-api.io/"
+            },
+        )
                     title=f"Ostrom ({zip_code})",
                     data={
                         CONF_CLIENT_ID: client_id,
