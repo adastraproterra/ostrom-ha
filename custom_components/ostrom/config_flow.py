@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import logging
+from urllib.parse import quote
 
 import aiohttp
 import voluptuous as vol
@@ -50,8 +51,8 @@ async def _validate_credentials(
     }
     body = (
         f"grant_type=password"
-        f"&username={aiohttp.helpers.quote(username)}"
-        f"&password={aiohttp.helpers.quote(password)}"
+        f"&username={quote(username)}"
+        f"&password={quote(password)}"
     )
     try:
         async with aiohttp.ClientSession() as session:
