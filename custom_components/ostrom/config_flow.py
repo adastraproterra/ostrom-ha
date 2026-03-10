@@ -1,6 +1,7 @@
 """Config flow for Ostrom integration."""
 from __future__ import annotations
 
+import base64
 import logging
 
 import aiohttp
@@ -13,6 +14,8 @@ from .const import (
     CONF_ARBEITSPREIS,
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
+    CONF_PASSWORD,
+    CONF_USERNAME,
     CONF_ZIP_CODE,
     DOMAIN,
     URI_AUTH,
@@ -24,33 +27,49 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_CLIENT_ID): str,
         vol.Required(CONF_CLIENT_SECRET): str,
+        vol.Required(CONF_USERNAME): str,
+        vol.Required(CONF_PASSWORD): str,
         vol.Required(CONF_ZIP_CODE): str,
         vol.Required(CONF_ARBEITSPREIS, default=30.0): vol.Coerce(float),
     }
 )
 
 
-async def _validate_credentials(client_id: str, client_secret: str) -> bool:
-    """Try to authenticate with the Ostrom API."""
-    import base64
-    credentials = f"{client_id}:{client_secret}"
-    encoded = base64.b64encode(credentials.encode()).decode()
+async def _validate_credentials(
+    client_id: str, client_secret: str, username: str, password: str
+) -> str | None:
+    """
+    Try to authenticate using password grant (for fetching own customer data).
+    Returns the access token on success, None on failure.
+    """
+    encoded = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
     headers = {
         "Authorization": f"Basic {encoded}",
         "Content-Type": "application/x-www-form-urlencoded",
         "Accept": "application/json",
     }
+    body = (
+        f"grant_type=password"
+        f"&username={aiohttp.helpers.quote(username)}"
+        f"&password={aiohttp.helpers.quote(password)}"
+    )
     try:
         async with aiohttp.ClientSession() as session:
             resp = await session.post(
                 URI_AUTH,
-                data="grant_type=client_credentials",
+                data=body,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=10),
             )
-            return resp.status == 200
-    except aiohttp.ClientError:
-        return False
+            if resp.status == 200:
+                data = await resp.json()
+                return data.get("access_token")
+            text = await resp.text()
+            _LOGGER.debug("Auth failed (%s): %s", resp.status, text)
+            return None
+    except aiohttp.ClientError as err:
+        _LOGGER.debug("Auth connection error: %s", err)
+        return None
 
 
 class OstromConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -67,20 +86,24 @@ class OstromConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             client_id = user_input[CONF_CLIENT_ID].strip()
             client_secret = user_input[CONF_CLIENT_SECRET].strip()
+            username = user_input[CONF_USERNAME].strip()
+            password = user_input[CONF_PASSWORD]
             zip_code = user_input[CONF_ZIP_CODE].strip()
             arbeitspreis = user_input[CONF_ARBEITSPREIS]
 
-            valid = await _validate_credentials(client_id, client_secret)
-            if not valid:
+            token = await _validate_credentials(client_id, client_secret, username, password)
+            if not token:
                 errors["base"] = "invalid_auth"
             else:
-                await self.async_set_unique_id(client_id)
+                await self.async_set_unique_id(username.lower())
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
                     title=f"Ostrom ({zip_code})",
                     data={
                         CONF_CLIENT_ID: client_id,
                         CONF_CLIENT_SECRET: client_secret,
+                        CONF_USERNAME: username,
+                        CONF_PASSWORD: password,
                         CONF_ZIP_CODE: zip_code,
                         CONF_ARBEITSPREIS: arbeitspreis,
                     },
@@ -94,4 +117,3 @@ class OstromConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "portal_url": "https://developer.ostrom-api.io/"
             },
         )
-
