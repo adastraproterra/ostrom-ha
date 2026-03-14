@@ -10,7 +10,13 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, UPDATE_INTERVAL_MINUTES, URI_AUTH, URI_API
+from .const import (
+    DOMAIN,
+    ENV_PRODUCTION,
+    UPDATE_INTERVAL_MINUTES,
+    URI_AUTH,
+    URI_API,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -25,6 +31,7 @@ class OstromCoordinator(DataUpdateCoordinator):
         client_secret: str,
         zip_code: str,
         arbeitspreis: float,
+        environment: str = ENV_PRODUCTION,
     ) -> None:
         super().__init__(
             hass,
@@ -36,6 +43,9 @@ class OstromCoordinator(DataUpdateCoordinator):
         self._client_secret = client_secret
         self._zip_code = zip_code
         self.arbeitspreis = arbeitspreis
+        self._environment = environment
+        self._auth_url = URI_AUTH[environment]
+        self._api_url = URI_API[environment]
         self._contract_id: str | None = None
 
     async def _get_token(self) -> str:
@@ -51,34 +61,42 @@ class OstromCoordinator(DataUpdateCoordinator):
         async with aiohttp.ClientSession() as session:
             async with asyncio.timeout(10):
                 resp = await session.post(
-                    URI_AUTH,
+                    self._auth_url,
                     data="grant_type=client_credentials",
                     headers=headers,
                 )
+                text = await resp.text()
+                _LOGGER.debug("Token response [%s]: %s", resp.status, text)
                 if resp.status != 200:
-                    text = await resp.text()
                     raise UpdateFailed(f"Auth failed ({resp.status}): {text}")
-                data = await resp.json()
-                return data["access_token"]
+                import json
+                return json.loads(text)["access_token"]
 
     async def _get_contract_id(self, token: str) -> str | None:
         """Fetch the contract ID via GET /contracts."""
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
         async with aiohttp.ClientSession() as session:
             async with asyncio.timeout(10):
-                resp = await session.get(f"{URI_API}/contracts", headers=headers)
+                resp = await session.get(
+                    f"{self._api_url}/contracts", headers=headers
+                )
+                text = await resp.text()
+                _LOGGER.debug("Contracts response [%s]: %s", resp.status, text)
                 if resp.status != 200:
-                    _LOGGER.warning("Could not fetch contracts (%s)", resp.status)
+                    _LOGGER.warning("Could not fetch contracts (%s): %s", resp.status, text)
                     return None
-                data = await resp.json()
+                import json
+                data = json.loads(text)
                 contracts = data if isinstance(data, list) else data.get("data", [])
                 if contracts:
                     c = contracts[0]
-                    return str(c.get("id") or c.get("contractId"))
+                    cid = c.get("id") or c.get("contractId")
+                    _LOGGER.debug("Using contract ID: %s", cid)
+                    return str(cid)
                 return None
 
     async def _get_spot_prices(self, token: str) -> list[dict]:
-        """Fetch day-ahead spot prices. Resolution HOUR is the only allowed value."""
+        """Fetch day-ahead spot prices (resolution HOUR only per API docs)."""
         now = datetime.now(timezone.utc)
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end = start + timedelta(days=2)
@@ -92,19 +110,17 @@ class OstromCoordinator(DataUpdateCoordinator):
         async with aiohttp.ClientSession() as session:
             async with asyncio.timeout(10):
                 resp = await session.get(
-                    f"{URI_API}/spot-prices", headers=headers, params=params
+                    f"{self._api_url}/spot-prices", headers=headers, params=params
                 )
                 if resp.status != 200:
                     text = await resp.text()
                     raise UpdateFailed(f"Spot prices failed ({resp.status}): {text}")
-                raw = await resp.json()
+                import json
+                raw = json.loads(await resp.text())
                 return raw.get("data", raw) if isinstance(raw, dict) else raw
 
     async def _get_consumption(self, token: str, contract_id: str) -> dict:
-        """Fetch consumption via GET /contracts/{contractId}/energy-consumption.
-        
-        Allowed resolutions per API docs: HOUR, DAY, MONTH.
-        """
+        """Fetch consumption. Allowed resolutions: HOUR, DAY, MONTH."""
         now = datetime.now(timezone.utc)
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -123,12 +139,13 @@ class OstromCoordinator(DataUpdateCoordinator):
                 }
                 async with asyncio.timeout(10):
                     resp = await session.get(
-                        f"{URI_API}/contracts/{contract_id}/energy-consumption",
+                        f"{self._api_url}/contracts/{contract_id}/energy-consumption",
                         headers=headers,
                         params=params,
                     )
                     if resp.status == 200:
-                        data = await resp.json()
+                        import json
+                        data = json.loads(await resp.text())
                         entries = (
                             data.get("data", data) if isinstance(data, dict) else data
                         )
@@ -176,25 +193,19 @@ class OstromCoordinator(DataUpdateCoordinator):
                     price_gross = entry.get("grossKwhPrice") or entry.get("netKwhPrice")
                     if price_gross is not None:
                         price_eur = round(price_gross / 100, 4)
-                        forecast.append(
-                            {
-                                "datetime": dt.isoformat(),
-                                "price_eur_kwh": price_eur,
-                                "price_ct_kwh": round(price_gross, 4),
-                            }
-                        )
-                        if dt.replace(
+                        forecast.append({
+                            "datetime": dt.isoformat(),
+                            "price_eur_kwh": price_eur,
+                            "price_ct_kwh": round(price_gross, 4),
+                        })
+                        if dt.replace(minute=0, second=0, microsecond=0) == now.replace(
                             minute=0, second=0, microsecond=0
-                        ) == now.replace(minute=0, second=0, microsecond=0):
+                        ):
                             current_price_eur = price_eur
                 except (ValueError, TypeError) as err:
                     _LOGGER.debug("Could not parse price entry %s: %s", entry, err)
 
-            consumption: dict = {
-                "monthly_kwh": None,
-                "daily_kwh": None,
-                "total_cost": None,
-            }
+            consumption: dict = {"monthly_kwh": None, "daily_kwh": None, "total_cost": None}
             if self._contract_id:
                 consumption = await self._get_consumption(token, self._contract_id)
 

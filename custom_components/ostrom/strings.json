@@ -5,12 +5,14 @@
         "title": "Set up Ostrom",
         "description": "Enter your API credentials from the [Ostrom Developer Portal]({portal_url}). Log in with your Ostrom app account to create a Customer API Client.",
         "data": {
+          "environment": "Environment",
           "client_id": "Client ID",
           "client_secret": "Client Secret",
           "zip_code": "Postal Code",
           "arbeitspreis": "Working Price (ct/kWh)"
         },
         "data_description": {
+          "environment": "Use Production for your real account. Use Sandbox only for testing with a sandbox client.",
           "client_id": "Your Client ID from the Ostrom Developer Portal.",
           "client_secret": "Your Client Secret from the Ostrom Developer Portal.",
           "zip_code": "Your postal code – used to fetch regional grid fees and levies.",
@@ -19,12 +21,20 @@
       }
     },
     "error": {
-      "invalid_auth": "Authentication failed. Please check your Client ID and Client Secret.",
+      "invalid_auth": "Authentication failed. Please check your Client ID and Client Secret, and make sure the environment (Production/Sandbox) matches your client type.",
       "cannot_connect": "Failed to connect to the Ostrom API. Please try again.",
       "unknown": "An unexpected error occurred."
     },
     "abort": {
       "already_configured": "Ostrom is already configured."
+    }
+  },
+  "selector": {
+    "environment": {
+      "options": {
+        "production": "Production",
+        "sandbox": "Sandbox"
+      }
     }
   },
   "entity": {

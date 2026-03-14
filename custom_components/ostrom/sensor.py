@@ -12,11 +12,9 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import (
-    CURRENCY_EURO,
-    UnitOfEnergy,
-)
+from homeassistant.const import CURRENCY_EURO, UnitOfEnergy
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -26,27 +24,26 @@ from .coordinator import OstromCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class OstromSensorEntityDescription(SensorEntityDescription):
     """Describe an Ostrom sensor."""
 
-    data_key: str = ""
+    data_key: str
     extra_attrs_key: str | None = None
 
 
 SENSOR_DESCRIPTIONS: tuple[OstromSensorEntityDescription, ...] = (
     OstromSensorEntityDescription(
         key="arbeitspreis",
-        name="Arbeitspreis",
+        name="Working Price",
         data_key="arbeitspreis",
         native_unit_of_measurement="ct/kWh",
-        device_class=None,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:currency-eur",
     ),
     OstromSensorEntityDescription(
         key="current_price",
-        name="Aktueller Strompreis",
+        name="Current Electricity Price",
         data_key="current_price_eur",
         native_unit_of_measurement=f"{CURRENCY_EURO}/kWh",
         device_class=SensorDeviceClass.MONETARY,
@@ -56,7 +53,7 @@ SENSOR_DESCRIPTIONS: tuple[OstromSensorEntityDescription, ...] = (
     ),
     OstromSensorEntityDescription(
         key="monthly_consumption",
-        name="Verbrauch diesen Monat",
+        name="Monthly Consumption",
         data_key="monthly_kwh",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
@@ -65,7 +62,7 @@ SENSOR_DESCRIPTIONS: tuple[OstromSensorEntityDescription, ...] = (
     ),
     OstromSensorEntityDescription(
         key="daily_consumption",
-        name="Verbrauch heute",
+        name="Daily Consumption",
         data_key="daily_kwh",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
@@ -74,7 +71,7 @@ SENSOR_DESCRIPTIONS: tuple[OstromSensorEntityDescription, ...] = (
     ),
     OstromSensorEntityDescription(
         key="total_cost",
-        name="Kosten diesen Monat",
+        name="Monthly Cost",
         data_key="total_cost",
         native_unit_of_measurement=CURRENCY_EURO,
         device_class=SensorDeviceClass.MONETARY,
@@ -90,8 +87,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Ostrom sensors from config entry."""
-    coordinator: OstromCoordinator = hass.data[DOMAIN][entry.entry_id]
-
+    coordinator: OstromCoordinator = entry.runtime_data
     async_add_entities(
         OstromSensor(coordinator, description, entry)
         for description in SENSOR_DESCRIPTIONS
@@ -102,6 +98,7 @@ class OstromSensor(CoordinatorEntity[OstromCoordinator], SensorEntity):
     """Representation of an Ostrom sensor."""
 
     entity_description: OstromSensorEntityDescription
+    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -113,13 +110,12 @@ class OstromSensor(CoordinatorEntity[OstromCoordinator], SensorEntity):
         super().__init__(coordinator)
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
-        self._attr_name = description.name
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": "Ostrom",
-            "manufacturer": "Ostrom",
-            "model": "Energie API",
-        }
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name="Ostrom",
+            manufacturer="Ostrom",
+            model="Energy API",
+        )
 
     @property
     def native_value(self) -> Any:
@@ -130,14 +126,11 @@ class OstromSensor(CoordinatorEntity[OstromCoordinator], SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Return extra state attributes (e.g. forecast)."""
+        """Return extra state attributes."""
         if (
             self.entity_description.extra_attrs_key is None
             or self.coordinator.data is None
         ):
             return None
         value = self.coordinator.data.get(self.entity_description.extra_attrs_key)
-        if value is None:
-            return None
-        return {"preisprognose_24h": value}
-      
+        return {"preisprognose_24h": value} if value is not None else None
