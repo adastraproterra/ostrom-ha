@@ -1,11 +1,11 @@
 {
   "domain": "ostrom",
   "name": "Ostrom",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "codeowners": [],
   "config_flow": true,
-  "documentation": "https://github.com/adastraproterra/ostrom-ha",
-  "issue_tracker": "https://github.com/adastraproterra/ostrom-ha/issues",
+  "documentation": "https://github.com/DEIN-USERNAME/ostrom-ha",
+  "issue_tracker": "https://github.com/DEIN-USERNAME/ostrom-ha/issues",
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "requirements": []

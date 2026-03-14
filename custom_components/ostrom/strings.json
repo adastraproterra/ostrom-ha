@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Set up Ostrom",
-        "description": "Enter your API credentials from the [Ostrom Developer Portal]({portal_url}).",
+        "description": "Enter your API credentials from the [Ostrom Developer Portal]({portal_url}). Log in with your Ostrom app account to create a Customer API Client.",
         "data": {
           "client_id": "Client ID",
           "client_secret": "Client Secret",
@@ -11,9 +11,9 @@
           "arbeitspreis": "Working Price (ct/kWh)"
         },
         "data_description": {
-          "client_id": "Your OAuth2 Client ID from the Ostrom Developer Portal.",
-          "client_secret": "Your OAuth2 Client Secret from the Ostrom Developer Portal.",
-          "zip_code": "Your postal code, used to fetch regional grid fees.",
+          "client_id": "Your Client ID from the Ostrom Developer Portal.",
+          "client_secret": "Your Client Secret from the Ostrom Developer Portal.",
+          "zip_code": "Your postal code – used to fetch regional grid fees and levies.",
           "arbeitspreis": "Your static contracted working price in ct/kWh (shown as a fixed sensor)."
         }
       }
@@ -29,22 +29,11 @@
   },
   "entity": {
     "sensor": {
-      "arbeitspreis": {
-        "name": "Working Price"
-      },
-      "current_price": {
-        "name": "Current Electricity Price"
-      },
-      "monthly_consumption": {
-        "name": "Monthly Consumption"
-      },
-      "daily_consumption": {
-        "name": "Daily Consumption"
-      },
-      "total_cost": {
-        "name": "Monthly Cost"
-      }
+      "arbeitspreis": { "name": "Working Price" },
+      "current_price": { "name": "Current Electricity Price" },
+      "monthly_consumption": { "name": "Monthly Consumption" },
+      "daily_consumption": { "name": "Daily Consumption" },
+      "total_cost": { "name": "Monthly Cost" }
     }
   }
 }
-

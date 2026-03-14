@@ -1,13 +1,12 @@
 """DataUpdateCoordinator for the Ostrom integration."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from datetime import datetime, timedelta, timezone
-from urllib.parse import quote
 
 import aiohttp
-import async_timeout
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -24,8 +23,6 @@ class OstromCoordinator(DataUpdateCoordinator):
         hass: HomeAssistant,
         client_id: str,
         client_secret: str,
-        username: str,
-        password: str,
         zip_code: str,
         arbeitspreis: float,
     ) -> None:
@@ -37,15 +34,12 @@ class OstromCoordinator(DataUpdateCoordinator):
         )
         self._client_id = client_id
         self._client_secret = client_secret
-        self._username = username
-        self._password = password
         self._zip_code = zip_code
         self.arbeitspreis = arbeitspreis
-        self._access_token: str | None = None
         self._contract_id: str | None = None
 
     async def _get_token(self) -> str:
-        """Fetch OAuth2 access token using password grant (own customer data)."""
+        """Fetch OAuth2 access token using client_credentials grant."""
         encoded = base64.b64encode(
             f"{self._client_id}:{self._client_secret}".encode()
         ).decode()
@@ -54,14 +48,13 @@ class OstromCoordinator(DataUpdateCoordinator):
             "Content-Type": "application/x-www-form-urlencoded",
             "Accept": "application/json",
         }
-        body = (
-            f"grant_type=password"
-            f"&username={quote(self._username)}"
-            f"&password={quote(self._password)}"
-        )
         async with aiohttp.ClientSession() as session:
-            async with async_timeout.timeout(10):
-                resp = await session.post(URI_AUTH, data=body, headers=headers)
+            async with asyncio.timeout(10):
+                resp = await session.post(
+                    URI_AUTH,
+                    data="grant_type=client_credentials",
+                    headers=headers,
+                )
                 if resp.status != 200:
                     text = await resp.text()
                     raise UpdateFailed(f"Auth failed ({resp.status}): {text}")
@@ -69,22 +62,23 @@ class OstromCoordinator(DataUpdateCoordinator):
                 return data["access_token"]
 
     async def _get_contract_id(self, token: str) -> str | None:
-        """Fetch the contract ID from the API."""
+        """Fetch the contract ID via GET /contracts."""
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
         async with aiohttp.ClientSession() as session:
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 resp = await session.get(f"{URI_API}/contracts", headers=headers)
                 if resp.status != 200:
-                    _LOGGER.warning("Could not fetch contract ID (%s)", resp.status)
+                    _LOGGER.warning("Could not fetch contracts (%s)", resp.status)
                     return None
                 data = await resp.json()
                 contracts = data if isinstance(data, list) else data.get("data", [])
                 if contracts:
-                    return str(contracts[0].get("id") or contracts[0].get("contractId"))
+                    c = contracts[0]
+                    return str(c.get("id") or c.get("contractId"))
                 return None
 
     async def _get_spot_prices(self, token: str) -> list[dict]:
-        """Fetch spot prices for today and tomorrow."""
+        """Fetch day-ahead spot prices. Resolution HOUR is the only allowed value."""
         now = datetime.now(timezone.utc)
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end = start + timedelta(days=2)
@@ -96,7 +90,7 @@ class OstromCoordinator(DataUpdateCoordinator):
         }
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
         async with aiohttp.ClientSession() as session:
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 resp = await session.get(
                     f"{URI_API}/spot-prices", headers=headers, params=params
                 )
@@ -107,56 +101,57 @@ class OstromCoordinator(DataUpdateCoordinator):
                 return raw.get("data", raw) if isinstance(raw, dict) else raw
 
     async def _get_consumption(self, token: str, contract_id: str) -> dict:
-        """Fetch monthly and daily consumption."""
+        """Fetch consumption via GET /contracts/{contractId}/energy-consumption.
+        
+        Allowed resolutions per API docs: HOUR, DAY, MONTH.
+        """
         now = datetime.now(timezone.utc)
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-        result = {"monthly_kwh": None, "daily_kwh": None, "total_cost": None}
+        result: dict = {"monthly_kwh": None, "daily_kwh": None, "total_cost": None}
 
         async with aiohttp.ClientSession() as session:
-            # Monthly consumption
-            params = {
-                "startDate": month_start.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
-                "endDate": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
-                "resolution": "MONTH",
-            }
-            async with async_timeout.timeout(10):
-                resp = await session.get(
-                    f"{URI_API}/contracts/{contract_id}/energy-consumption",
-                    headers=headers,
-                    params=params,
-                )
-                if resp.status == 200:
-                    data = await resp.json()
-                    entries = data.get("data", data) if isinstance(data, dict) else data
-                    if entries:
-                        result["monthly_kwh"] = round(
-                            sum(e.get("consumptionKwh", e.get("consumption", 0) or 0) for e in entries), 3
+            for resolution, start, key_kwh in [
+                ("MONTH", month_start, "monthly_kwh"),
+                ("DAY", day_start, "daily_kwh"),
+            ]:
+                params = {
+                    "startDate": start.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                    "endDate": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                    "resolution": resolution,
+                }
+                async with asyncio.timeout(10):
+                    resp = await session.get(
+                        f"{URI_API}/contracts/{contract_id}/energy-consumption",
+                        headers=headers,
+                        params=params,
+                    )
+                    if resp.status == 200:
+                        data = await resp.json()
+                        entries = (
+                            data.get("data", data) if isinstance(data, dict) else data
                         )
-                        result["total_cost"] = round(
-                            sum(e.get("costGross", e.get("cost", 0) or 0) for e in entries), 2
+                        if entries:
+                            result[key_kwh] = round(
+                                sum(
+                                    e.get("consumptionKwh", e.get("consumption", 0) or 0)
+                                    for e in entries
+                                ),
+                                3,
+                            )
+                            if resolution == "MONTH":
+                                result["total_cost"] = round(
+                                    sum(
+                                        e.get("costGross", e.get("cost", 0) or 0)
+                                        for e in entries
+                                    ),
+                                    2,
+                                )
+                    else:
+                        _LOGGER.debug(
+                            "Consumption (%s) not available: %s", resolution, resp.status
                         )
-
-            # Daily consumption
-            params["startDate"] = day_start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-            params["endDate"] = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-            params["resolution"] = "DAY"
-            async with async_timeout.timeout(10):
-                resp = await session.get(
-                    f"{URI_API}/contracts/{contract_id}/energy-consumption",
-                    headers=headers,
-                    params=params,
-                )
-                if resp.status == 200:
-                    data = await resp.json()
-                    entries = data.get("data", data) if isinstance(data, dict) else data
-                    if entries:
-                        result["daily_kwh"] = round(
-                            sum(e.get("consumptionKwh", e.get("consumption", 0) or 0) for e in entries), 3
-                        )
-
         return result
 
     async def _async_update_data(self) -> dict:
@@ -170,8 +165,8 @@ class OstromCoordinator(DataUpdateCoordinator):
             spot_prices = await self._get_spot_prices(token)
 
             now = datetime.now(timezone.utc)
-            current_price_eur = None
-            forecast = []
+            current_price_eur: float | None = None
+            forecast: list[dict] = []
 
             for entry in spot_prices:
                 try:
@@ -181,19 +176,25 @@ class OstromCoordinator(DataUpdateCoordinator):
                     price_gross = entry.get("grossKwhPrice") or entry.get("netKwhPrice")
                     if price_gross is not None:
                         price_eur = round(price_gross / 100, 4)
-                        forecast.append({
-                            "datetime": dt.isoformat(),
-                            "price_eur_kwh": price_eur,
-                            "price_ct_kwh": round(price_gross, 4),
-                        })
-                        if dt.replace(minute=0, second=0, microsecond=0) == now.replace(
+                        forecast.append(
+                            {
+                                "datetime": dt.isoformat(),
+                                "price_eur_kwh": price_eur,
+                                "price_ct_kwh": round(price_gross, 4),
+                            }
+                        )
+                        if dt.replace(
                             minute=0, second=0, microsecond=0
-                        ):
+                        ) == now.replace(minute=0, second=0, microsecond=0):
                             current_price_eur = price_eur
                 except (ValueError, TypeError) as err:
                     _LOGGER.debug("Could not parse price entry %s: %s", entry, err)
 
-            consumption = {"monthly_kwh": None, "daily_kwh": None, "total_cost": None}
+            consumption: dict = {
+                "monthly_kwh": None,
+                "daily_kwh": None,
+                "total_cost": None,
+            }
             if self._contract_id:
                 consumption = await self._get_consumption(token, self._contract_id)
 
@@ -206,5 +207,5 @@ class OstromCoordinator(DataUpdateCoordinator):
                 "arbeitspreis": self.arbeitspreis,
             }
 
-        except aiohttp.ClientError as err:
+        except (aiohttp.ClientError, TimeoutError) as err:
             raise UpdateFailed(f"Network error: {err}") from err
